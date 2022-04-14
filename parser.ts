@@ -1,13 +1,16 @@
+import { table } from 'console';
 import { TreeCursor } from 'lezer';
 import {parser} from 'lezer-python';
+import { isIfStatement } from 'typescript';
 import {Parameter, Stmt, Expr, Type, isOp} from './ast';
+import { tcProgram } from './tc';
 
 export function parseProgram(source : string) : Array<Stmt<any>> {
   const t = parser.parse(source).cursor();
   return traverseStmts(source, t);
 }
 
-export function traverseStmts(s : string, t : TreeCursor) {
+export function traverseStmts(s : string, t : TreeCursor) : Array<Stmt<any>>{
   // The top node in the program is a Script node with a list of children
   // that are various statements
   t.firstChild();
@@ -16,6 +19,7 @@ export function traverseStmts(s : string, t : TreeCursor) {
     stmts.push(traverseStmt(s, t));
   } while(t.nextSibling()); // t.nextSibling() returns false when it reaches
                             //  the end of the list of children
+  t.parent();
   return stmts;
 }
 
@@ -33,12 +37,14 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
     case "AssignStatement":
       t.firstChild(); // focused on name (the first child)
       var name = s.substring(t.from, t.to);
+      t.nextSibling(); // focused on :type part, explained in Chocopy
+      var anno =  s.substring(t.from+1, t.to).trim(); // Use +2 to skip the :
       t.nextSibling(); // focused on = sign. May need this for complex tasks, like +=!
       t.nextSibling(); // focused on the value expression
 
       var value = traverseExpr(s, t);
       t.parent();
-      return { tag: "assign", name, value };
+      return { a: anno, tag: "assign", name, value };
     case "ExpressionStatement":
       t.firstChild(); // The child is some kind of expression, the
                       // ExpressionStatement is just a wrapper with no information
@@ -71,7 +77,50 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
         tag: "define",
         name, params, body, ret
       }
-      
+    case "PassStatement":
+      return {tag: "pass"};
+    case "IfStatement":
+      t.firstChild();
+      t.nextSibling();
+      const cond_expr = traverseExpr(s,t);
+      t.nextSibling();//focus on body
+      t.firstChild();//focus on :
+      const stmt_b:Array<Stmt<any>> = [];
+      const else_stmt_b:Array<Stmt<any>> = [];
+      while (t.nextSibling()){
+        stmt_b.push(traverseStmt(s,t));
+      }
+      t.parent();
+      t.nextSibling();
+      if (t.node.type.name==="else"){
+        t.nextSibling();//focus on body
+        t.firstChild();//focus on :
+
+        while (t.nextSibling()){
+          else_stmt_b.push(traverseStmt(s,t));
+        }
+        t.parent();
+        t.parent();
+        return {tag:"if", cond: cond_expr, body: stmt_b,else_body:else_stmt_b};   
+      } else {
+        t.parent();
+        return {tag:"if", cond: cond_expr, body: stmt_b,else_body:else_stmt_b}
+      }
+    case "WhileStatement":
+      t.firstChild();
+      t.nextSibling();
+      const cond_while = traverseExpr(s,t);
+      t.nextSibling();//focus on body
+      t.firstChild();//focus on :
+      const stmt_w:Array<Stmt<any>> = [];
+      while (t.nextSibling()){
+        stmt_w.push(traverseStmt(s,t));
+      }
+      t.parent();
+      t.parent();
+      return  {tag:"while", cond:cond_while,body:stmt_w}
+
+   
   }
 }
 
@@ -79,7 +128,7 @@ export function traverseType(s : string, t : TreeCursor) : Type {
   switch(t.type.name) {
     case "VariableName":
       const name = s.substring(t.from, t.to);
-      if(name !== "int") {
+      if(name !== "int" && name !=="none" && name !== "bool") {
         throw new Error("Unknown type: " + name)
       }
       return name;
@@ -112,6 +161,8 @@ export function traverseParameters(s : string, t : TreeCursor) : Parameter[] {
 
 export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
   switch(t.type.name) {
+    case "None":
+      return {tag:"none"}
     case "Boolean":
       if(s.substring(t.from, t.to) === "True") { return { tag: "true" }; }
       else { return { tag: "false" }; }
@@ -128,6 +179,41 @@ export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
       var result : Expr<any> = { tag: "call", name, args: args};
       t.parent();
       return result;
+    case "UnaryExpression":
+      t.firstChild();
+      const uop = s.substring(t.from, t.to);
+      switch (uop) {
+        case '-':
+          t.nextSibling();
+          var num = Number(uop + s.substring(t.from, t.to));
+          if (isNaN(num)){
+            throw new Error("PARSE ERROR: unary operation failed")
+          }
+          t.parent();
+          return { tag: "number", value: num }
+        case '+':
+          t.nextSibling();
+          var num = Number(uop + s.substring(t.from, t.to));
+          if (isNaN(num)){
+            throw new Error("PARSE ERROR: unary operation failed")
+          }
+          t.parent();
+          return { tag: "number", value: num }
+        case "not":
+          var not_result:Expr<any>;
+          t.nextSibling();
+          if(s.substring(t.from, t.to) === "True") {
+            not_result = {tag: "false"}
+          } else{
+            not_result = {tag: "true"}
+          }
+          t.parent();
+          return not_result;
+
+        case "default":
+          throw new Error("PARSE ERROR: unimplemented unary op");
+      }
+
     case "BinaryExpression":
       t.firstChild(); // go to lhs
       const lhsExpr = traverseExpr(s, t);
@@ -145,6 +231,16 @@ export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
         lhs: lhsExpr,
         rhs: rhsExpr
       };
+    case "ParenthesizedExpression":
+      t.firstChild(); // focus on (
+      t.nextSibling();
+      const paren_exp = traverseExpr(s,t)
+      t.nextSibling(); // focus on )
+      t.parent();
+      return paren_exp
+
+    default:
+      throw new Error(`Expression not included in traverseExpr: ${t.type.name}, ${s.substring(t.from, t.to)}`)
   
   }
 }
@@ -161,4 +257,22 @@ export function traverseArguments(c : TreeCursor, s : string) : Expr<any>[] {
   } 
   c.parent();       // Pop to ArgList
   return args;
+}
+export function traverse(c : TreeCursor, s : string) : Array<Stmt<any>> {
+  switch(c.node.type.name) {
+    case "Script":
+      const stmts = [];
+      c.firstChild();
+      do {
+        stmts.push(traverseStmt(s,c));
+      } while(c.nextSibling())
+      console.log("traversed " + stmts.length + " statements ", stmts, "stopped at " , c.node);
+      return stmts;
+    default:
+      throw new Error("Could not parse program at " + c.node.from + " " + c.node.to);
+  }
+}
+export function parse(source : string) : Array<Stmt<any>> {
+  const t = parser.parse(source);
+  return traverse(t.cursor(), source);
 }

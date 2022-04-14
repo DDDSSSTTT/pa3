@@ -30,12 +30,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   runButton.addEventListener("click", async () => {
     const program = userCode.value;
     const output = document.getElementById("output");
+    output.innerHTML='';
+    display("Program Output:")
     try {
       const wat = compile(program);
       const code = document.getElementById("generated-code");
-      code.textContent = wat;
+      code.textContent = 'Code Generated:' + wat;
       const result = await run(wat, importObject);
-      output.textContent += String(result);
+      //output.textContent += (String(result));
+      // display(String(result));
       output.setAttribute("style", "color: black");
     }
     catch(e) {

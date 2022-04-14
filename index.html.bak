@@ -21,13 +21,11 @@
     </style>
 </head>
 <body>
-  <div class = "editor" style="width:30%">
+  <div style="width:30%">
   <button id="run">Run!</button>
   <textarea style="width: 40em; height: 40em;" id="user-code"></textarea>
   </div>
-  <div class = "interactions">
   <pre style="width:30%" id="generated-code"></pre>
   <pre style="width:30%" id="output"></pre>
-  </div>
 </body>
 </html>
