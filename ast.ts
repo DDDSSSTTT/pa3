@@ -5,19 +5,21 @@ export type Type =
   | "int"
   | "bool"
   | "none"
+  | { tag:"object", class: string}
 
 export type Parameter =
   | { name: string, typ: Type }
 export type Program<A> =
     | { a?: A, varinits: VarInit<A>[], fundefs: FunDef<A>[],stmt: Stmt<A>[] }
 export type VarInit<A> = {a?: A, name:string, type:Type, init:Literal<A>}
-export type FunDef<A> = {a?: A, name:string,params: TypedVar<A>[], ret: Type, inits:VarInit<A>[], body: Stmt<A>}
+export type FunDef<A> = {a?: A, name:string,params: Parameter[], ret: Type, inits:Stmt<A>[], body: Array<Stmt<A>>}
 export type TypedVar<A> = {a?: A, name: string, type:Type}
 
 export type Stmt<A> =
   | { a?: A, tag: "assign", name: string, value: Expr<A> }
   | { a?: A, tag: "expr", expr: Expr<A> }
-  | { a?: A, tag: "define", name: string, params: Parameter[], ret: Type, body: Stmt<A>[] }
+  | { a?: A, tag: "define", name: string, params: Parameter[], ret: Type, body: Array<Stmt<A>> }
+  | { a?: A, tag: "class", name:string, fields: Stmt<A>[], methods: Map <string, FunDef<A>>}
   | { a?: "none", tag:"pass"}
   | { a?: A, tag: "return", value: Expr<A> }
   | { a?: A, tag: "if", cond: Expr<A>, body: Stmt<A>[], else_body: Stmt<A>[]}
@@ -27,6 +29,9 @@ export type Expr<A> =
   | { a?: A, tag: "number", value: number }
   | { a?: A, tag: "true" }
   | { a?: A, tag: "false" }
+  | { a?: A, tag: "self"}
+  | { a?: A, tag: "getfield", obj: Expr<A>, name: string}
+  | { a?: A, tag: "method", obj: Expr<A>, name: string, args: Expr<A>[]}
   | { a?: A, tag: "none" }
   | { a?: A, tag: "builtin1", name: string, arg: Expr<A> }
   | { a?: A, tag: "builtin2", name: string, arg1: Expr<A>, arg2: Expr<A> }

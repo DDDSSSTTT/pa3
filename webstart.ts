@@ -1,4 +1,4 @@
-import {compile, run} from './compiler';
+import {compile, runwatsrc} from './compiler';
 
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -7,8 +7,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("output").appendChild(elt);
     elt.innerText = arg;
   }
+  var memory = new WebAssembly.Memory({initial:10, maximum:100});
   var importObject = {
     imports: {
+      mem:memory,
       print_num: (arg : any) => {
         console.log("Logging from WASM: ", arg);
         display(String(arg));
@@ -36,7 +38,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const wat = compile(program);
       const code = document.getElementById("generated-code");
       code.textContent = 'Code Generated:' + wat;
-      const result = await run(wat, importObject);
+      const result = await runwatsrc(wat, importObject);
       //output.textContent += (String(result));
       // display(String(result));
       output.setAttribute("style", "color: black");

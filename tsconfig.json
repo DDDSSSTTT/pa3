@@ -1,12 +1,12 @@
 {
   "compilerOptions": {
     "outDir": "./dist/",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
     "noImplicitAny": true,
     "target": "es5",
     "allowJs": true,
     "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
     "lib": ["es2019", "dom"]
   }
 }

@@ -2,9 +2,13 @@ import { table } from 'console';
 import { TreeCursor } from 'lezer';
 import {parser} from 'lezer-python';
 import { isIfStatement } from 'typescript';
-import {Parameter, Stmt, Expr, Type, isOp} from './ast';
-import { tcProgram } from './tc';
+import {Parameter, Stmt, Expr, Type, isOp, VarInit, FunDef, TypedVar} from './ast';
+import { tcExpr, tcProgram } from './tc';
 
+var supportedTypes = ["int","none","bool"];
+var cls_field_map = new Map();
+var cls_method_map = new Map();
+var cls_name_reg = "none";
 export function parseProgram(source : string) : Array<Stmt<any>> {
   const t = parser.parse(source).cursor();
   return traverseStmts(source, t);
@@ -44,6 +48,7 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
 
       var value = traverseExpr(s, t);
       t.parent();
+      console.log("Assign-return:",{ a: anno, tag: "assign", name, value } )
       return { a: anno, tag: "assign", name, value };
     case "ExpressionStatement":
       t.firstChild(); // The child is some kind of expression, the
@@ -76,6 +81,51 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
       return {
         tag: "define",
         name, params, body, ret
+      }
+    case "ClassDefinition":
+      t.firstChild();  // Focus on def
+      t.nextSibling(); // Focus on name of function
+      var name = s.substring(t.from, t.to);
+      cls_field_map.set(name,[]);
+      cls_method_map.set(name,[]);
+      supportedTypes.push(name);
+      cls_name_reg = name;
+      t.nextSibling(); // Focus on object, the original param list
+      //no params here, as only "object" is allowed
+      t.nextSibling(); // Focus on Body or TypeDef
+      t.nextSibling(); // Focus on single statement (for now)
+      t.firstChild();  // Focus on :
+      let varInits:Array<Stmt<any>> = [];
+      let clsBody = new Map();
+      while(t.nextSibling()) {
+        let cls_stmt = traverseStmt(s, t);
+        if (cls_stmt.tag == "define"){
+          // { a?: A, tag: "class", name:string, fields: Stmt<A>[], methods: Map <string, FunDef<A>>}
+          clsBody.set(cls_stmt.name,{name:cls_stmt.name,params: cls_stmt.params,
+                        ret:cls_stmt.ret,inits:varInits,body: cls_stmt.body});
+          // push in the method name
+          cls_method_map.get(name).push(cls_stmt.name);
+        } else {
+          if (cls_stmt.tag == "assign"){
+            varInits.push(cls_stmt)
+            cls_field_map.get(name).push(cls_stmt.name);
+          } else {
+            throw new Error("PARSER ERROR: unsupported statements type for class definition")
+          }
+
+        }
+
+      }
+      t.parent();      // Pop to Body
+      t.parent();      // Pop to FunctionDefinition
+      console.log("class_name", name);
+      cls_name_reg = "none";
+      return {
+        a: name,
+        tag: "class",
+        name: name, 
+        fields: varInits, 
+        methods: clsBody
       }
     case "PassStatement":
       return {tag: "pass"};
@@ -128,12 +178,14 @@ export function traverseType(s : string, t : TreeCursor) : Type {
   switch(t.type.name) {
     case "VariableName":
       const name = s.substring(t.from, t.to);
-      if(name !== "int" && name !=="none" && name !== "bool") {
-        throw new Error("Unknown type: " + name)
+      // if(name !== "int" && name !=="none" && name !== "bool") {
+      if (!supportedTypes.includes(name)){
+        throw new Error("Unknown VariableName type: " + name)
       }
-      return name;
+      let return_name = name as Type;
+      return return_name;
     default:
-      throw new Error("Unknown type: " + t.type.name)
+      throw new Error("Unknown non-VariableName type: " + t.type.name)
 
   }
 }
@@ -173,10 +225,22 @@ export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
     case "CallExpression":
       t.firstChild(); // Focus name
       var name = s.substring(t.from, t.to);
+      if (name.includes('.')){
+        var obj_parsed = traverseExpr(s,t);
+      }
+
+      var result : Expr<any>
       t.nextSibling(); // Focus ArgList
       t.firstChild(); // Focus open paren
       var args = traverseArguments(t, s);
-      var result : Expr<any> = { tag: "call", name, args: args};
+      t.prevSibling();
+      if (name.includes('.')){
+        if (obj_parsed.tag == "getfield"){
+          result = {tag:"method", obj:obj_parsed.obj,name:obj_parsed.name,args:args}
+        }
+      } else {
+        result = { tag: "call", name, args: args};
+      }
       t.parent();
       return result;
     case "UnaryExpression":
@@ -185,6 +249,12 @@ export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
       switch (uop) {
         case '-':
           t.nextSibling();
+          var this_var = traverseExpr(s,t)
+          if (this_var.tag == "id" ){
+            t.parent();
+            return {tag:'binop',op:'*',lhs:{a:"int",tag:"number",value:-1},rhs:this_var}
+          } 
+
           var num = Number(uop + s.substring(t.from, t.to));
           if (isNaN(num)){
             throw new Error("PARSE ERROR: unary operation failed")
@@ -193,6 +263,11 @@ export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
           return { tag: "number", value: num }
         case '+':
           t.nextSibling();
+          var this_var = traverseExpr(s,t)
+          if (this_var.tag == "id" ){
+            t.parent();
+            return {tag:'binop',op:'*',lhs:{a:"int",tag:"number",value:1},rhs:this_var}
+          } 
           var num = Number(uop + s.substring(t.from, t.to));
           if (isNaN(num)){
             throw new Error("PARSE ERROR: unary operation failed")
@@ -238,7 +313,30 @@ export function traverseExpr(s : string, t : TreeCursor) : Expr<any> {
       t.nextSibling(); // focus on )
       t.parent();
       return paren_exp
+    case "MemberExpression":
+        t.firstChild(); //focus on variable name like "c","self"
+        var cls_name = s.substring(t.from,t.to);
+        var cls_obj = traverseExpr(s,t)
+        t.nextSibling();
+        t.nextSibling(); // focus on property name
+        const property_name = s.substring(t.from,t.to);
+        var result:Expr<any>; 
+        // Try to parse self with a register
+        if (cls_name == "self"){
+          if (cls_name_reg=="none"){
+            throw new Error("Illegal self here");
+          } else {
+            cls_name = cls_name_reg;
+          }         
+        }
+        t.parent();
+        console.log(`Member Expression, obj:${cls_obj}, name:${property_name}`)
+        result = { tag: "getfield", obj: cls_obj,name: property_name}
 
+
+        return result;
+    case "self":
+      return {tag:"self",a:{tag:"object",class:cls_name_reg}};
     default:
       throw new Error(`Expression not included in traverseExpr: ${t.type.name}, ${s.substring(t.from, t.to)}`)
   
