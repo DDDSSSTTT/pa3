@@ -8,8 +8,6 @@ import { none } from "binaryen";
 export function typeCheck(source: string) : Type {
   let ast = parseProgram(source);
   ast = tcProgram(ast);
-  var result = none;
-  console.debug(ast);
   return ast[ast.length - 1].a;
 }
 

@@ -1,0 +1,28 @@
+assertTC("tc-two-classes", `
+class C(object):
+    d : D = None
+
+class D(object):
+    c : C = None
+c : C = None
+c.d
+`, CLASS("D"));
+// 16
+assertTC("tc-two-classes-methods", `
+class C(object):
+	d : D = None
+	def new(self: C, d : D) -> C:
+	  self.d = d
+	  return self
+  
+class D(object):
+	c : C = None
+	def new(self: D, c: C) -> D:
+	  self.c = c
+	  return self
+  
+c : C = None
+d : D = None
+c = C().new(d)
+c.d.c
+`, CLASS("C"));

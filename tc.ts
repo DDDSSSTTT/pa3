@@ -6,7 +6,7 @@ import { isintOp, isboolOp} from "./ast";
 type FunctionsEnv = Map<string, [Type[], Type]>;
 type BodyEnv = Map<string, Type>;
 type ClassEnv = Map <string,Stmt<any>>;
-var self_reg = "none";
+var  objEnv :Map <string,Type>;
 var obj_name_reg = "none";
 type TypeEnv = {
   vars: BodyEnv
@@ -207,9 +207,9 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
     var cls_name;
     switch (e.obj.tag){
       case "id":
-        var obj_type = variables.get(e.obj.name);
+        var obj_type = objEnv.get(e.obj.name);
         if (obj_type=="bool"||obj_type =="int"||obj_type=="none"){
-          throw new Error(`The Type of ${e.obj.name} should be an obj`)
+          throw new Error(`RUNTIME ERROR: The Type of ${e.obj.name} should be an obj`)
         }else{
           cls_name = obj_type.class;
         }
@@ -218,7 +218,18 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         cls_name = e.obj.a.class;
         break;
       case "getfield":
-        cls_name = e.obj.a.class;
+        if (e.obj.a===undefined){
+          var get_class = objEnv.get(e.obj.name);
+          if (get_class== "bool" || get_class == "int" || get_class == "none"){
+            throw new Error(`Weird. Class Statement ${cls_stmt} has tag ${cls_stmt.tag}`);
+          }else{
+            cls_name = get_class.class;
+          }
+
+        }else{
+          cls_name = e.obj.a.class;
+        }
+
         break;
       case "method":
         cls_name = e.obj.a.class;
@@ -237,8 +248,10 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
       }
       var anno;
       console.log(`try to find type from this cls st_mt ${cls_stmt}`)
+
       cls_stmt.fields.forEach(fld => {
         if(fld.tag=="assign"&&fld.name==e.name){
+          console.log(fld);
           console.log(`find type ${fld.a} for ${e.name}`)
           anno = fld.a;
           
@@ -262,6 +275,11 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       if (s.value.tag == "call" &&classes.has(s.value.name)){
         console.log(`Set ONR to ${s.name}`)
         obj_name_reg = s.name;
+        var obj_type = classes.get(s.value.name).a
+        if (isObject(obj_type) && !obj_type.hasOwnProperty('tag')){
+          obj_type = CLASS(obj_type);
+        }
+        objEnv.set(s.name,obj_type);
       }
       console.log("pass the call class check");
       const rhs = tcExpr(s.value, classes, functions, variables);
@@ -281,6 +299,15 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       } 
       console.log("tcStmt-assign",s.a,rhs.a);
       console.log("Assignable?",assignableTo(s.a,rhs.a))
+
+      if (s.a=="none" && isObject(rhs.a)){
+        // check class type of lhs,rhs
+        console.log("Assign class to none, with classes",classes)
+        var cls_typ = objEnv.get(s.name);
+        if (!assignableTo(cls_typ,rhs.a)){
+          throw new Error(`Class Mismatch: Try to assign ${rhs.a} to ${s.name}, which is type ${cls_typ}`)
+        }
+      }
       if (!assignableTo(s.a,rhs.a)){
         // Make an exemption for assign "none" to "obj"
           throw new Error(`TYPE ERROR: Cannot assign ${rhs.a} to ${s.name}, which requires ${s.a}`);
@@ -288,6 +315,8 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       } else {
         if (rhs.a=="none" && isObject(s.a)){
           s.a = {tag:"object",class:s.a};
+          objEnv.set(s.name,s.a);
+          
         } 
       }
       if(variables.has(s.name) && !assignableTo(variables.get(s.name),rhs.a)) {
@@ -295,9 +324,9 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       }
       else {
         if (rhs.a == "none"){
-          variables.set(s.name,s.a);
           console.log("Assign None Result", variables.get(s.name))
-          s.a = "none";
+          variables.set(s.name,rhs.a);        
+          // we don't want to change s.a here
         } else {
           variables.set(s.name,rhs.a)
         }
@@ -345,7 +374,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
     }
     case "expr": {
       const ret = tcExpr(s.expr, classes, functions, variables);
-      return { ...s, expr: ret,a:ret.a };
+      return { ...s, expr: ret, a:ret.a };
     }
     case "return": {
       const valTyp = tcExpr(s.value, classes, functions, variables);
@@ -387,7 +416,8 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
 export function tcProgram(p : Stmt<any>[]) : Stmt<Type>[] {
   console.log("tcprogram,p",p)
   const functions = new Map<string, [Type[], Type]>();
-  const classes = new Map<string, Stmt<any>>()
+  const classes = new Map<string, Stmt<any>>();
+  objEnv = new Map<string, Type>();
   p.forEach(s => {
     if(s.tag === "define") {
       functions.set(s.name, [s.params.map(p => p.typ), s.ret]);
@@ -428,17 +458,20 @@ export function isObject(tp:Type) : boolean{
   return !(tp == "int" || tp == "bool" || tp == "none")
 }
 export function assignableTo(type_a: Type, type_b: Type) : boolean{
+
   // Rule No.0: if strictly equal, allow!
   if (type_b===type_a){
     return true;
   }
-
   // Rule No.1: None is able to be assigned to everyone.
   if (type_b == "none"){ 
   // Very Tricky here,must be fixed later
   return isObject(type_a)
   }
-
+  // Rule No1.5 Object is assignable to None
+  if (type_a == "none" &&isObject(type_b)){
+    return true
+  }
   // Rule No.2: Only Object is allowed to assign object.
   if (type_b!="int" && type_b !="bool"){
     if(type_a!="int" && type_a != "none" && type_a !="bool"){
@@ -447,3 +480,6 @@ export function assignableTo(type_a: Type, type_b: Type) : boolean{
   }
   return false;
 }
+export function CLASS(name : string) : Type { 
+  return { tag: "object", class: name }
+};

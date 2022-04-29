@@ -6,8 +6,6 @@ import {Parameter, Stmt, Expr, Type, isOp, VarInit, FunDef, TypedVar} from './as
 import { isObject, tcExpr, tcProgram } from './tc';
 
 var supportedTypes = ["int","none","bool"];
-var cls_field_map = new Map();
-var cls_method_map = new Map();
 var cls_name_reg = "none";
 export function parseProgram(source : string) : Array<Stmt<any>> {
   const t = parser.parse(source).cursor();
@@ -86,8 +84,6 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
       t.firstChild();  // Focus on def
       t.nextSibling(); // Focus on name of function
       var name = s.substring(t.from, t.to);
-      cls_field_map.set(name,[]);
-      cls_method_map.set(name,[]);
       supportedTypes.push(name);
       cls_name_reg = name;
       t.nextSibling(); // Focus on object, the original param list
@@ -103,12 +99,9 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
           // { a?: A, tag: "class", name:string, fields: Stmt<A>[], methods: Map <string, FunDef<A>>}
           clsBody.set(cls_stmt.name,{name:cls_stmt.name,params: cls_stmt.params,
                         ret:cls_stmt.ret,inits:varInits,body: cls_stmt.body});
-          // push in the method name
-          cls_method_map.get(name).push(cls_stmt.name);
         } else {
           if (cls_stmt.tag == "assign"){
             varInits.push(cls_stmt)
-            cls_field_map.get(name).push(cls_stmt.name);
           } else {
             throw new Error("PARSER ERROR: unsupported statements type for class definition")
           }
@@ -178,10 +171,10 @@ export function traverseType(s : string, t : TreeCursor) : Type {
   switch(t.type.name) {
     case "VariableName":
       const name = s.substring(t.from, t.to);
-      // if(name !== "int" && name !=="none" && name !== "bool") {
-      if (!supportedTypes.includes(name)){
-        throw new Error("Unknown VariableName type: " + name)
-      }
+      // // if(name !== "int" && name !=="none" && name !== "bool") {
+      // if (!supportedTypes.includes(name)){
+      //   throw new Error("Unknown VariableName type: " + name)
+      // }
       let return_name = name as Type;
       return return_name;
     default:
