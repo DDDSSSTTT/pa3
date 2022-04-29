@@ -345,7 +345,20 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       const bodyvars = new Map<string, Type>(variables.entries());
       s.params.forEach(p => { bodyvars.set(p.name, p.typ)});
       console.log("define-s.body",s.body);
+      var return_flag = 0;
       const newStmts = s.body.map(bs => tcStmt(bs, classes, functions, bodyvars, s.ret));
+      if (s.ret!="none"){
+        
+        s.body.forEach(bs=>{
+          if(bs.tag=="return"){
+            return_flag = 1;
+          }
+        })
+        if (return_flag==0){
+          throw new Error(`TYPE ERROR: ${s.ret} never returns`)
+        }
+
+      }
       return { ...s, body: newStmts };
     }
     case "class":{
