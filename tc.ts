@@ -101,7 +101,7 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
             }
             
           } else {
-            throw new Error (`[tc.ts]Unhandled binary op ${e.op}`);
+            throw new Error (`TYPE ERROR: [tc.ts]Unhandled binary op ${e.op}`);
           }          
 
         }  
@@ -111,7 +111,7 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
     case "call":
       var result:Expr<any>;
       if(e.name === "print") {
-        if(e.args.length !== 1) { throw new Error("print expects a single argument"); }
+        if(e.args.length !== 1) { throw new Error("TYPE ERROR: print expects a single argument"); }
         const newArgs = [tcExpr(e.args[0], classes,functions, variables)];
         const res : Expr<Type> = { ...e, a: "none", args: newArgs } ;
         return res;
@@ -120,11 +120,11 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         // Calling class()
         const class_stmt = classes.get(e.name);
         if (class_stmt.tag != "class"){
-          throw new Error (`Variable ${e.name} should be a class, however its tag is not`);
+          throw new Error (`TYPE ERROR: Variable ${e.name} should be a class, however its tag is not`);
         } else {
           class_stmt.fields.forEach(vi => {
             if (vi.tag !="assign"){
-              throw new Error ("fields with non-assign tag")
+              throw new Error ("TYPE ERROR: fields with non-assign tag")
             } else {
               if (obj_name_reg == "none"){
                 //Comeon!
@@ -142,15 +142,15 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
 
       } else {
         if(!functions.has(e.name)) {
-          throw new Error(`function ${e.name} not found`);
+          throw new Error(`TYPE ERROR: function ${e.name} not found`);
         }
         var [args, ret] = functions.get(e.name);
       if(args.length !== e.args.length) {
-        throw new Error(`TC-call-function:Expected ${args.length} arguments but got ${e.args.length}`);
+        throw new Error(`TYPE ERROR: TC-call-function:Expected ${args.length} arguments but got ${e.args.length}`);
       }
       const newArgs = args.map((a, i) => {
         const argtyp = tcExpr(e.args[i], classes, functions, variables);
-        if(a !== argtyp.a) { throw new Error(`Got ${argtyp} as argument ${i + 1}, expected ${a}`); }
+        if(a !== argtyp.a) { throw new Error(`TYPE ERROR: Got ${argtyp} as argument ${i + 1}, expected ${a}`); }
         return argtyp
       });
       result = { ...e, a: ret, args: newArgs }
@@ -190,7 +190,7 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
               t.typ = {tag: "object", class:String(t.typ)};
             }
             if (t.name != "self"&& !assignableTo(t.typ,newArgs[i-1].a)){
-              throw new Error(`Arg Types mismatch for ${t.typ} and ${newArgs[i-1].a}`);
+              throw new Error(`TYPE ERROR: Arg Types mismatch for ${t.typ} and ${newArgs[i-1].a}`);
             }
           })
         } else {
@@ -221,7 +221,7 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         if (e.obj.a===undefined){
           var get_class = objEnv.get(e.obj.name);
           if (get_class== "bool" || get_class == "int" || get_class == "none"){
-            throw new Error(`Weird. Class Statement ${cls_stmt} has tag ${cls_stmt.tag}`);
+            throw new Error(`TYPE ERROR: Weird. Class Statement ${cls_stmt} has tag ${cls_stmt.tag}`);
           }else{
             cls_name = get_class.class;
           }
@@ -235,7 +235,7 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         cls_name = e.obj.a.class;
         break;
       default:
-        throw new Error(`tc: getfield, not a supported datatype,but ${e.obj.tag}`)
+        throw new Error(`TYPE ERROR: tc: getfield, not a supported datatype,but ${e.obj.tag}`)
     }
 
       var cls_stmt = classes.get(cls_name)
@@ -244,7 +244,7 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         cls_stmt = classes.get(cls_stmt.a.class)
       }
       if (cls_stmt.tag != "class"){
-        throw new Error('tc: statement is not class')
+        throw new Error('TYPE ERROR: tc: statement is not class')
       }
       var anno;
       console.log(`try to find type from this cls st_mt ${cls_stmt}`)
@@ -305,7 +305,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
         console.log("Assign class to none, with classes",classes)
         var cls_typ = objEnv.get(s.name);
         if (!assignableTo(cls_typ,rhs.a)){
-          throw new Error(`Class Mismatch: Try to assign ${rhs.a} to ${s.name}, which is type ${cls_typ}`)
+          throw new Error(`TYPE ERROR: Class Mismatch: Try to assign ${rhs.a} to ${s.name}, which is type ${cls_typ}`)
         }
       }
       if (!assignableTo(s.a,rhs.a)){
@@ -320,7 +320,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
         } 
       }
       if(variables.has(s.name) && !assignableTo(variables.get(s.name),rhs.a)) {
-        throw new Error(`${s.name} already declared, which requires ${s.a}`);
+        throw new Error(`TYPE ERROR: ${s.name} already declared, which requires ${s.a}`);
       }
       else {
         if (rhs.a == "none"){
@@ -353,7 +353,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       s.fields.forEach(vi => {
         const tc_vi =  tcStmt(vi, classes,functions,bodyvars,"none");
         if (vi.tag !="assign"){
-          throw new Error(`vi ${vi}'s tag is not assign`);
+          throw new Error(`TYPE ERROR: vi ${vi}'s tag is not assign`);
           } else {
             bodyvars.set(vi.name,tc_vi.a);
           }
@@ -382,7 +382,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
         currentReturn  = {tag:"object", class: String(currentReturn)}
       }
       if(!assignableTo(currentReturn,valTyp.a)) {
-        throw new Error(`${valTyp} returned but ${currentReturn} expected.`);
+        throw new Error(`TYPE ERROR: ${valTyp} returned but ${currentReturn} expected.`);
       }
       return { ...s, value: valTyp };
     }
@@ -392,7 +392,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
     case "if":{
       const cond = tcExpr(s.cond, classes, functions,variables);
       if (cond.a!="bool"){
-        throw new Error (`${cond} must be a bool, instead it is now ${cond.a}`)
+        throw new Error (`TYPE ERROR: ${cond} must be a bool, instead it is now ${cond.a}`)
       }
       const new_bd_st = s.body.map(bs => tcStmt(bs, classes, functions,variables,currentReturn));
       if (s.else_body.length===0){
@@ -405,7 +405,7 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
     case "while":{
       const cond = tcExpr(s.cond,classes,functions,variables);
       if (cond.a!="bool"){
-        throw new Error (`${cond} must be a bool, instead it is now ${cond.a}`)
+        throw new Error (`TYPE ERROR: ${cond} must be a bool, instead it is now ${cond.a}`)
       }
       const new_bd_st = s.body.map(bs => tcStmt(bs, classes, functions,variables,currentReturn));
       return {...s, cond:cond, body: new_bd_st}      
