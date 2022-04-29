@@ -3,7 +3,7 @@ import { TreeCursor } from 'lezer';
 import {parser} from 'lezer-python';
 import { isIfStatement } from 'typescript';
 import {Parameter, Stmt, Expr, Type, isOp, VarInit, FunDef, TypedVar} from './ast';
-import { tcExpr, tcProgram } from './tc';
+import { isObject, tcExpr, tcProgram } from './tc';
 
 var supportedTypes = ["int","none","bool"];
 var cls_field_map = new Map();

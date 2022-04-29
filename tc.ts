@@ -6,6 +6,8 @@ import { isintOp, isboolOp} from "./ast";
 type FunctionsEnv = Map<string, [Type[], Type]>;
 type BodyEnv = Map<string, Type>;
 type ClassEnv = Map <string,Stmt<any>>;
+var self_reg = "none";
+var obj_name_reg = "none";
 type TypeEnv = {
   vars: BodyEnv
   funs: FunctionsEnv
@@ -115,10 +117,26 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         return res;
       }
       if (classes.has (e.name)){
+        // Calling class()
         const class_stmt = classes.get(e.name);
         if (class_stmt.tag != "class"){
           throw new Error (`Variable ${e.name} should be a class, however its tag is not`);
         } else {
+          class_stmt.fields.forEach(vi => {
+            if (vi.tag !="assign"){
+              throw new Error ("fields with non-assign tag")
+            } else {
+              if (obj_name_reg == "none"){
+                //Comeon!
+
+              } else {
+                variables.set(`${obj_name_reg}.${vi.name}`,vi.a);
+                console.log(`Append this entry: ${obj_name_reg}.${vi.name} to variables`);
+              }
+    
+            }
+    
+          });
           return {...e, a: {tag:"object",class:class_stmt.name}}
         }
 
@@ -137,7 +155,6 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
       });
       result = { ...e, a: ret, args: newArgs }
       }
-
 
       return result;
     case "literal":
@@ -169,24 +186,45 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
           // Here we must ignore self by adding 1 to the rhs
           if (argTyps.length !== newArgs.length+1){throw "tc: method arg mismatch";}
           argTyps.forEach((t,i)=>{
-            if (t.name != "self"&& !assignableTo(t.typ,newArgs[i].a)){throw `Arg Types mismatch for ${t} and ${i}`;}
+            if (isObject(t.typ) && !t.typ.hasOwnProperty('tag')){
+              t.typ = {tag: "object", class:String(t.typ)};
+            }
+            if (t.name != "self"&& !assignableTo(t.typ,newArgs[i-1].a)){
+              throw new Error(`Arg Types mismatch for ${t.typ} and ${newArgs[i-1].a}`);
+            }
           })
         } else {
           throw `Tag says ${e.name} is a method, but annotation says it isn't an object`
         }
         }
+      if (isObject(retType) && !retType.hasOwnProperty('tag')){
+        //Just a normal string
+        retType = {tag: "object", class: String(retType)}
+      }
 
-      return { ...e, a:"none", obj:newObj,args:newArgs}
+      return { ...e, a:retType, obj:newObj,args:newArgs}
   case "getfield":
     var cls_name;
-    if (e.obj.tag == "id"){
-      cls_name = e.obj.name;
-    }else {
-      if (e.obj.tag=="self"){
+    switch (e.obj.tag){
+      case "id":
+        var obj_type = variables.get(e.obj.name);
+        if (obj_type=="bool"||obj_type =="int"||obj_type=="none"){
+          throw new Error(`The Type of ${e.obj.name} should be an obj`)
+        }else{
+          cls_name = obj_type.class;
+        }
+        break;
+      case "self":
         cls_name = e.obj.a.class;
-      } else {
-        throw new Error("tc: getfield, not an id, nor self")
-      }
+        break;
+      case "getfield":
+        cls_name = e.obj.a.class;
+        break;
+      case "method":
+        cls_name = e.obj.a.class;
+        break;
+      default:
+        throw new Error(`tc: getfield, not a supported datatype,but ${e.obj.tag}`)
     }
 
       var cls_stmt = classes.get(cls_name)
@@ -198,33 +236,51 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         throw new Error('tc: statement is not class')
       }
       var anno;
+      console.log(`try to find type from this cls st_mt ${cls_stmt}`)
       cls_stmt.fields.forEach(fld => {
         if(fld.tag=="assign"&&fld.name==e.name){
+          console.log(`find type ${fld.a} for ${e.name}`)
           anno = fld.a;
           
         }
       });
       return { ...e,a:anno}
+    case "self":
+
+        return {...e,}
+  
       
   }
+
 }
 
 export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsEnv, variables : BodyEnv, currentReturn : Type) : Stmt<Type> {
   console.log("tcStmt", s)
   switch(s.tag) {
     case "assign": {
+      var self_flag = 0;
+      if (s.value.tag == "call" &&classes.has(s.value.name)){
+        console.log(`Set ONR to ${s.name}`)
+        obj_name_reg = s.name;
+      }
+      console.log("pass the call class check");
       const rhs = tcExpr(s.value, classes, functions, variables);
+
       if (s.a===''){
+        if (s.name.startsWith('self.')){
+          s.name = s.name.split('.',2)[1];
+          self_flag = 1;
+        }
         if (variables.has(s.name)){
           console.log("get_name",variables.get(s.name))
           s.a = variables.get(s.name);
         } else {
-          throw new Error(`Cannot change the value of ${s.name} before its declaration`)
+          throw new Error(`RUNTIME ERROR: Cannot change the value of ${s.name} before its declaration`)
         }
 
       } 
       console.log("tcStmt-assign",s.a,rhs.a);
-      console.log(assignableTo(s.a,rhs.a))
+      console.log("Assignable?",assignableTo(s.a,rhs.a))
       if (!assignableTo(s.a,rhs.a)){
         // Make an exemption for assign "none" to "obj"
           throw new Error(`TYPE ERROR: Cannot assign ${rhs.a} to ${s.name}, which requires ${s.a}`);
@@ -240,14 +296,20 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       else {
         if (rhs.a == "none"){
           variables.set(s.name,s.a);
-          console.log(variables.get(s.name))
+          console.log("Assign None Result", variables.get(s.name))
+          s.a = "none";
         } else {
           variables.set(s.name,rhs.a)
         }
         console.log(variables);
 
       }
-      classes.set(s.name,s);
+      // classes.set(s.name,s);
+      if (self_flag==1){
+        s.name = 'self.' + s.name;
+      }
+      self_flag = 0;
+      obj_name_reg = "none";
       return { ...s, value: rhs };
     }
     case "define": {
@@ -258,8 +320,15 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
       return { ...s, body: newStmts };
     }
     case "class":{
-      const bodyvars = new Map<string, Type>(variables.entries());
-      s.fields.forEach(vi => {tcStmt(vi, classes,functions,bodyvars,"none")});
+      var bodyvars = new Map<string, Type>(variables.entries());
+      s.fields.forEach(vi => {
+        const tc_vi =  tcStmt(vi, classes,functions,bodyvars,"none");
+        if (vi.tag !="assign"){
+          throw new Error(`vi ${vi}'s tag is not assign`);
+          } else {
+            bodyvars.set(vi.name,tc_vi.a);
+          }
+      });
       console.log("s-fields:",s.fields);
       var new_methods = new Map <string, FunDef<Type>>();
       s.methods.forEach ((mds,name) =>{
@@ -276,11 +345,14 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
     }
     case "expr": {
       const ret = tcExpr(s.expr, classes, functions, variables);
-      return { ...s, expr: ret };
+      return { ...s, expr: ret,a:ret.a };
     }
     case "return": {
       const valTyp = tcExpr(s.value, classes, functions, variables);
-      if(valTyp.a !== currentReturn) {
+      if (isObject(currentReturn)){
+        currentReturn  = {tag:"object", class: String(currentReturn)}
+      }
+      if(!assignableTo(currentReturn,valTyp.a)) {
         throw new Error(`${valTyp} returned but ${currentReturn} expected.`);
       }
       return { ...s, value: valTyp };
@@ -328,7 +400,9 @@ export function tcProgram(p : Stmt<any>[]) : Stmt<Type>[] {
   const globals = new Map<string, Type>();
   return p.map(s => {
     if(s.tag === "assign") {
+      console.log("psmap, check assign",s.value);
       const rhs = tcExpr(s.value, classes, functions, globals);
+      console.log("psmap, rhs:",rhs);
       const tc_s = tcStmt(s, classes, functions,globals,rhs.a);
       // globals.set(s.name, rhs.a);
       return { ...s, value: rhs };
