@@ -104,10 +104,83 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
           throw new Error ("Classdata has an non-class tag");
         } else {
           // First we compile its field
-          var return_str : string [];
-          var obj_name = obj_name_reg;
+          if (obj_name_reg == "none"){
+            // Call class without an obj assignment
 
-          return_str = create_obj(obj_name,classdata,locals)
+            var tmp_obj_name = `RESERVED_${unassigned_cls}`;
+            unassigned_cls += 1;
+            console.log(`Creating tmp var ${tmp_obj_name}`);
+            console.log(`TMP_VARS: ${tmp_vars}`);
+            tmp_vars.push(tmp_obj_name);
+            var str_push_tmp_name =`global.set $${tmp_obj_name}`;
+            var prev_obj_name_reg = obj_name_reg
+            obj_name_reg = tmp_obj_name;
+          }
+          classdata.fields.forEach((f,index)=>{
+            const offset = index * 4;
+            if (f.tag!="assign"){
+              throw new Error(`field ${f} does not have an 'assign' tag`);
+            }else{
+              var valToBe = codeGenExpr(f.value,locals);
+              if (valToBe.length>1){
+                throw new Error(`The compiled fields is not a literal`);
+              }
+              if (obj_field_type_idx.get(expr.name)===undefined){
+                console.log(`detect undefind for OFI: ${expr.name}`);
+                
+                obj_field_type_idx.set(expr.name,new Map<string, [Type,number]>());
+              }
+              if (obj_field_type_idx.get(obj_name_reg)===undefined){
+                obj_field_type_idx.set(obj_name_reg,new Map<string, [Type,number]>());
+              }
+
+              console.log(`adding this entry:${f.name},${index}`);
+              obj_field_type_idx.get(expr.name).set(f.name,[f.a,index]);
+              obj_field_type_idx.get(obj_name_reg).set(f.name,[f.a,index]);
+            }
+
+            initvals = [
+              ...initvals,
+              `(global.get $heap)`,
+              `(i32.add (i32.const ${offset}))`,
+              valToBe[0],
+              `i32.store`];
+          });
+
+          console.log("ONR:", obj_name_reg);
+
+          classdata.methods.forEach((func,f_name)=>{
+            const new_name = `${f_name}$${obj_name_reg}`;
+            const func_string = codeGenFunDef({...func,name:new_name});
+            decl_of_funcs = [decl_of_funcs.join() + func_string.join()]
+            console.log("DOF:",decl_of_funcs)
+          })
+          var init_method;
+          if (classdata.methods.has("__init__")){
+             init_method = `(call $__init__$${obj_name_reg})`;
+          }
+          decl_of_funcs = decl_of_funcs.flat();
+          console.log("DOF after flat:",decl_of_funcs)
+          if (prev_obj_name_reg!==undefined){
+            obj_name_reg = prev_obj_name_reg;
+          }
+          var return_str: string[];
+          return_str = [
+            ...initvals,
+            `(global.get $heap)`,
+            `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`,
+            `(global.set $${obj_name_reg})`
+          ]
+          console.log("STR TO PUSH", str_push_tmp_name)
+          if (str_push_tmp_name!==undefined){
+            return_str.push (str_push_tmp_name);
+          } 
+          if (init_method != undefined){
+            return_str.push (init_method);
+            return_str.push("(local.set $scratch)")
+          }
+          return_str.push(`(global.get $${obj_name_reg})`)
+
           return return_str;
         }
       }
@@ -152,21 +225,23 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
           if(eobj.tag=='self'){
             eobj = {tag:'id',name:obj_name_reg,a:eobj.a};
           }
-          if (eobj.tag == "method"){
+          if (obj_name_reg == "none" && eobj.tag == "method"){
             // Call class without an obj assignment
-            if (eobj.obj.a == "int" || eobj.obj.a=="none"||eobj.obj.a == "bool"){
-              throw new Error("RUNTIME ERROR: method obj type is not an obj");
-            }
-            let classdata = classes.get(eobj.obj.a.class);
-            create_obj(obj_name_reg,classdata,locals)
-            tmp_name = tmp_vars[tmp_vars.length-1];
-          }
 
+            var tmp_obj_name = `RESERVED_${unassigned_cls}`;
+            unassigned_cls += 1;
+            console.log(`Creating tmp var ${tmp_obj_name}`);
+            console.log(`TMP_VARS: ${tmp_vars}`);
+            tmp_vars.push(tmp_obj_name);
+            var str_push_tmp_name =`global.set $${tmp_obj_name}`;
+            var prev_obj_name_reg = obj_name_reg
+            obj_name_reg = tmp_obj_name;
+          }
           if (eobj.tag=="id" || eobj.tag == "method" || eobj.tag == "getfield" || eobj.tag == "call"){
             var method_stmts: string[];
             if (eobj_stmt.length>0){
               console.log("Got recursive expr in obj: tmp_name", tmp_name)
-              method_stmts = [ ...eobj_stmt, ...argInstrs, `call $${expr.name}$${tmp_name}`,`(local.set $scratch)`]
+              method_stmts = [ ...eobj_stmt, ...argInstrs, `call $${expr.name}$${tmp_name}`]
             } else {
               method_stmts = [ ...argInstrs, `call $${expr.name}$${eobj.name}`]
             }
@@ -364,8 +439,6 @@ export function codeGenStmt(stmt : Stmt<Type>, locals : Env, global_vars : Env) 
     case "expr":
       const result = codeGenExpr(stmt.expr, locals);
       result.push("(local.set $scratch)");
-
-
       return result;
     case "pass":
         const donothing : string[] =[]
@@ -446,77 +519,4 @@ export function compile(source : string) : string {
       )
     ) 
   `;
-}
-export function create_obj(obj_name : string,classdata: Stmt<Type>,locals:Env) : string[]{
-  var initvals : string[] = [];
-  var tmp_obj_name :string;
-  if (obj_name == "none"){
-    // Call class without an obj assignment
-    tmp_obj_name = `RESERVED_${unassigned_cls}`;
-    unassigned_cls += 1;
-    tmp_vars.push(tmp_obj_name);
-    var str_push_tmp_name =`global.set $${tmp_obj_name}`;  
-  } else {
-    tmp_obj_name = obj_name;
-  }
-  if (classdata.tag!='class'){
-    throw new Error ("Not class -class data");
-  }
-  classdata.fields.forEach((f,index)=>{
-    const offset = index * 4;
-    if (f.tag!="assign"){
-      throw new Error(`field ${f} does not have an 'assign' tag`);
-    }else{
-      var valToBe = codeGenExpr(f.value,locals);
-      if (valToBe.length>1){
-        throw new Error(`The compiled fields is not a literal`);
-      }
-      if (obj_field_type_idx.get(tmp_obj_name)===undefined){
-        obj_field_type_idx.set(tmp_obj_name,new Map<string, [Type,number]>());
-      }
-
-      console.log(`adding this entry:${f.name},${index}`);
-      obj_field_type_idx.get(tmp_obj_name).set(f.name,[f.a,index]);
-    }
-
-    initvals = [
-      ...initvals,
-      `(global.get $heap)`,
-      `(i32.add (i32.const ${offset}))`,
-      valToBe[0],
-      `i32.store`];
-  });
-
-  if (classdata.methods.size > 0){
-    classdata.methods.forEach((func,f_name)=>{
-      const new_name = `${f_name}$${tmp_obj_name}`;
-      const func_string = codeGenFunDef({...func,name:new_name});
-      decl_of_funcs = [decl_of_funcs.join() + func_string.join()]
-      console.log("DOF:",decl_of_funcs)
-    })
-    var init_method;
-    if (classdata.methods.has("__init__")){
-       init_method = `(call $__init__$${tmp_obj_name})`;
-    }
-    decl_of_funcs = decl_of_funcs.flat();
-    console.log("DOF after flat:",decl_of_funcs)
-
-  }
-  var return_str: string[];
-  return_str = [
-    ...initvals,
-    `(global.get $heap)`,
-    `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`,
-    `(global.set $${tmp_obj_name})`
-  ]
-  console.log("STR TO PUSH", str_push_tmp_name)
-  // if (str_push_tmp_name!==undefined){
-  //   return_str.push (str_push_tmp_name);
-  // } 
-  if (init_method != undefined){
-    return_str.push (init_method);
-    return_str.push("(local.set $scratch)")
-  }
-  return_str.push(`(global.get $${tmp_obj_name})`)
-  return return_str
 }

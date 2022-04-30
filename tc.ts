@@ -282,7 +282,10 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
           throw new Error(`RUNTIME ERROR: Cannot change the value of ${s.name} before its declaration`)
         }
 
-      } 
+      }
+      // if (!String(s.a).includes('tag')){
+      //   s.a = CLASS(s.a);
+      // } 
       console.log("tcStmt-assign",s.a,rhs.a);
       console.log("Assignable?",assignableTo(s.a,rhs.a))
 
@@ -485,5 +488,7 @@ export function assignableTo(type_a: Type, type_b: Type) : boolean{
   return false;
 }
 export function CLASS(name : string) : Type { 
-  return { tag: "object", class: name }
+
+    return { tag: "object", class: name }
+
 };
