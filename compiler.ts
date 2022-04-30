@@ -154,28 +154,31 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
             decl_of_funcs = [decl_of_funcs.join() + func_string.join()]
             console.log("DOF:",decl_of_funcs)
           })
-          
+          var init_method;
+          if (classdata.methods.has("__init__")){
+             init_method = `(call $__init__$${obj_name_reg})`;
+          }
           decl_of_funcs = decl_of_funcs.flat();
           console.log("DOF after flat:",decl_of_funcs)
           if (prev_obj_name_reg!==undefined){
             obj_name_reg = prev_obj_name_reg;
           }
           var return_str: string[];
+          return_str = [
+            ...initvals,
+            `(global.get $heap)`,
+            `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`,
+            `(global.set $${obj_name_reg})`
+          ]
           console.log("STR TO PUSH", str_push_tmp_name)
           if (str_push_tmp_name!==undefined){
-            return_str = [
-              ...initvals,
-              `(global.get $heap)`,
-              `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`,
-              str_push_tmp_name
-            ]
-          } else {
-            return_str = [
-              ...initvals,
-              `(global.get $heap)`,
-              `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`
-            ]
+            return_str.push (str_push_tmp_name);
+          } 
+          if (init_method != undefined){
+            return_str.push (init_method);
+            return_str.push("(local.set $scratch)")
           }
+          return_str.push(`(global.get $${obj_name_reg})`)
 
           return return_str;
         }

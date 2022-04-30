@@ -33,7 +33,13 @@ export function traverseStmt(s : string, t : TreeCursor) : Stmt<any> {
     case "ReturnStatement":
       t.firstChild();  // Focus return keyword
       t.nextSibling(); // Focus expression
-      var value = traverseExpr(s, t);
+      var value : Expr<any>;
+      if (s.substring(t.from,t.to)==""){
+        value = {tag:"none"};
+      } else {
+        value= traverseExpr(s, t);
+      }
+       
       t.parent();
       return { tag: "return", value };
     case "AssignStatement":
