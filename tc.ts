@@ -33,23 +33,6 @@ export function tcParams(params: TypedVar<any>[]) : TypedVar<Type>[]{
     return {...param, a: param.type}
   })
 }
-// export function tcFunDef(fun:FunDef<any>, cls : ClassEnv, env: TypeEnv): FunDef<Type>{
-//   const localEnv = duplicateEnv(env)
-//   //add params to env
-//   fun.params.forEach(param=>{
-//     localEnv.vars.set(param.name,param.type);
-//   })
-//   const typedParams = tcParams(fun.params);
-//   //Add inits
-//   const typedInits = tcVarInits(fun.inits, env);
-//   fun.inits.forEach(init=>{
-//     localEnv.vars.set(init.name,init.type);
-//   })
-//   localEnv.funs.set(fun.name,[fun.params.map(param=>param.type), fun.ret]);
-//   //Check body
-//   const typedStmts = tcStmt(fun.body,cls,localEnv.funs,localEnv.vars,localEnv.retType);
-//   return {...fun,params: typedParams, inits:typedInits, body:typedStmts};
-// }
 export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsEnv, variables : BodyEnv) : Expr<Type> {
   const emptyEnv = new Map<string, Type>();
 
@@ -381,6 +364,11 @@ export function tcStmt(s : Stmt<any>, classes : ClassEnv, functions : FunctionsE
         console.log(mds);
         console.log(mds.body);
         var stmt_from_mds:Stmt<Type> = {a:mds.a,tag:"define",name: mds.name,params:mds.params,ret:mds.ret,body:mds.body}
+        if (name == "__init__"){
+          console.log("TC, init check", mds.ret,mds.params.length);
+          if (mds.ret!="none"){throw new Error ("TYPE ERROR: init methods must return none");}
+          if (mds.params.length>1 || mds.params[0].name!="self"){ throw new Error ("TYPE ERROR: init must use self as the only param")}
+        }
         let result = tcStmt(stmt_from_mds,classes,functions,bodyvars,mds.ret);
         var mds_from_stmt:FunDef<Type> = {a:result.a,name: mds.name,params:mds.params,ret:mds.ret,inits:mds.inits,body:mds.body}
         new_methods.set(name,mds_from_stmt)
