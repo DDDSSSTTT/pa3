@@ -196,6 +196,9 @@ export function tcExpr(e : Expr<any>, classes : ClassEnv, functions : FunctionsE
         } else {
           throw `Tag says ${e.name} is a method, but annotation says it isn't an object`
         }
+        } else {
+            throw new Error(`RUNTIME ERROR: The Type of ${e.obj} should be an obj, instead it is a ${newObj.a}`)
+          
         }
       if (isObject(retType) && !retType.hasOwnProperty('tag')){
         //Just a normal string

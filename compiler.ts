@@ -8,7 +8,9 @@ var loop_counter: number = 0;
 type Env = Map<string, boolean>;
 var obj_field_type_idx : Map<string, Map<string, [Type,number]>>;
 var classes  = new Map<string, Stmt<Type>>();
-var obj_name_reg = "none"
+var obj_name_reg = "none";
+var tmp_vars :string [] = [];
+var unassigned_cls = 0;
 var decl_of_funcs:string[] = [];
 function variableNames(stmts: Stmt<Type>[],class_name: string = "") : string[] {
   const vars : Array<string> = [];
@@ -102,6 +104,17 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
           throw new Error ("Classdata has an non-class tag");
         } else {
           // First we compile its field
+          if (obj_name_reg == "none"){
+            // Call class without an obj assignment
+
+            var tmp_obj_name = `RESERVED_${unassigned_cls}`;
+            console.log(`Creating tmp var ${tmp_obj_name}`);
+            console.log(`TMP_VARS: ${tmp_vars}`);
+            tmp_vars.push(tmp_obj_name);
+            var str_push_tmp_name =`global.set $${tmp_obj_name}`;
+            var prev_obj_name_reg = obj_name_reg
+            obj_name_reg = tmp_obj_name;
+          }
           classdata.fields.forEach((f,index)=>{
             const offset = index * 4;
             if (f.tag!="assign"){
@@ -115,8 +128,11 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
                 console.log(`detect undefind for OFI: ${expr.name}`);
                 
                 obj_field_type_idx.set(expr.name,new Map<string, [Type,number]>());
+              }
+              if (obj_field_type_idx.get(obj_name_reg)===undefined){
                 obj_field_type_idx.set(obj_name_reg,new Map<string, [Type,number]>());
               }
+
               console.log(`adding this entry:${f.name},${index}`);
               obj_field_type_idx.get(expr.name).set(f.name,[f.a,index]);
               obj_field_type_idx.get(obj_name_reg).set(f.name,[f.a,index]);
@@ -131,25 +147,37 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
           });
 
           console.log("ONR:", obj_name_reg);
-          if (obj_name_reg=="none"){
-            throw new Error("Creating methods out of an object declaration");
-          }else{
-            classdata.methods.forEach((func,f_name)=>{
-              const new_name = `${f_name}$${obj_name_reg}`;
-              const func_string = codeGenFunDef({...func,name:new_name});
-              decl_of_funcs = [decl_of_funcs.join() + func_string.join()]
-              console.log("DOF:",decl_of_funcs)
-            })
-          }
+
+          classdata.methods.forEach((func,f_name)=>{
+            const new_name = `${f_name}$${obj_name_reg}`;
+            const func_string = codeGenFunDef({...func,name:new_name});
+            decl_of_funcs = [decl_of_funcs.join() + func_string.join()]
+            console.log("DOF:",decl_of_funcs)
+          })
           
           decl_of_funcs = decl_of_funcs.flat();
           console.log("DOF after flat:",decl_of_funcs)
+          if (prev_obj_name_reg!==undefined){
+            obj_name_reg = prev_obj_name_reg;
+          }
+          var return_str: string[];
+          console.log("STR TO PUSH", str_push_tmp_name)
+          if (str_push_tmp_name!==undefined){
+            return_str = [
+              ...initvals,
+              `(global.get $heap)`,
+              `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`,
+              str_push_tmp_name
+            ]
+          } else {
+            return_str = [
+              ...initvals,
+              `(global.get $heap)`,
+              `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`
+            ]
+          }
 
-          return [
-            ...initvals,
-            `(global.get $heap)`,
-            `(global.set $heap (i32.add (global.get $heap) (i32.const ${classdata.fields.length*4})))`
-          ];
+          return return_str;
         }
       }
       const valStmts = expr.args.map(e => codeGenExpr(e, locals)).flat();
@@ -178,17 +206,40 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
           "call"
         }
         if(anno_obj!="int" && anno_obj != "none" && anno_obj !="bool"){
-          const eobj =expr.obj;
+          var eobj =expr.obj;
+          var eobj_stmt : string[] = [];
+          var tmp_name = obj_name_reg;
+          if (eobj.tag == "id"){
+          } else{
+            // Currently it can be a call
+            var prev_length = tmp_vars.length;
+            var eobj_stmt = codeGenExpr(eobj,locals);
+            if (prev_length!=tmp_vars.length){
+              tmp_name = tmp_vars[tmp_vars.length-1];
+            }
+          }
+          if(eobj.tag=='self'){
+            eobj = {tag:'id',name:obj_name_reg,a:eobj.a};
+          }
           if (eobj.tag=="id" || eobj.tag == "method" || eobj.tag == "getfield" || eobj.tag == "call"){
-            var method_stmts = [ ...argInstrs, `call $${expr.name}$${eobj.name}`]
+            var method_stmts: string[];
+            if (eobj_stmt.length>0){
+              console.log("Got recursive expr in obj: tmp_name", tmp_name)
+              method_stmts = [ ...eobj_stmt, ...argInstrs, `call $${expr.name}$${tmp_name}`]
+            } else {
+              method_stmts = [ ...argInstrs, `call $${expr.name}$${eobj.name}`]
+            }
+
 
           } else{
-            throw new Error("Here obj tag must be id")
+
+            throw new Error("Here obj tag must be supported")
           }
 
         }
 
       }
+      console.log("method_stmts:",method_stmts);
   
       return method_stmts;
     case "getfield":
@@ -204,8 +255,6 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
           if(expr.obj.tag=='self'){
             expr.a = obj_field_type_idx.get(obj_name_reg).get(expr.name)[0]
             expr.obj = {tag:'id',name:obj_name_reg,a:expr.obj.a};
-
-
           }else{
             throw new Error(`obj tag is not 'id' or 'self', instead it's ${expr.obj.tag}`)
           }
@@ -221,12 +270,21 @@ export function codeGenExpr(expr : Expr<Type>, locals : Env) : Array<string> {
       } else{
         throw new Error(`obj get an annotation of ${anno}`)
       }
+    case "self":
+      if(locals.has(obj_name_reg)) { return [`(local.get $${obj_name_reg})`]; }
+      else { return [`(global.get $${obj_name_reg})`]; }
+    default:
+      throw new Error(`Expr ${expr} not implemented!`)
   }
 }
 export function codeGenFunDef(m:FunDef<any>){
     const emptyEnv = new Map<string, boolean>();
     const withParamsAndVariables = new Map<string, boolean>(emptyEnv.entries());
-
+    let i = m.name.indexOf('$')
+    if (i != -1){
+      var prev_obj_name_reg = obj_name_reg;
+      obj_name_reg = m.name.slice(i+1);
+    }
       // Construct the environment for the function body
       const variables = variableNames(m.body);
       variables.forEach(v => withParamsAndVariables.set(v, true));
@@ -243,6 +301,9 @@ export function codeGenFunDef(m:FunDef<any>){
       // Very Tricky here, we ignore the global variable
       const stmts = m.body.map(s => codeGenStmt(s, withParamsAndVariables,emptyEnv)).flat();
       const stmtsBody = stmts.join("\n");
+      if (prev_obj_name_reg !== undefined && prev_obj_name_reg != obj_name_reg){
+        obj_name_reg = prev_obj_name_reg
+      }
       return [`(func $${m.name} ${params} (result i32)
         (local $scratch i32)
         ${varDecls}
@@ -311,7 +372,9 @@ export function codeGenStmt(stmt : Stmt<Type>, locals : Env, global_vars : Env) 
       if(stmt.value.tag == 'call' && classes.has(stmt.value.name)){
         // We are creating an object
         console.log(`Creating object ${stmt.name} from ${stmt.value.name}`);
+        var prev_obj_name_reg = obj_name_reg;
         obj_name_reg = stmt.name;
+        console.log("prev_obj", prev_obj_name_reg, "obj", obj_name_reg);
         var svn = stmt.value.name;
         ofi.set(stmt.name, ofi.get(svn));
         ofi.delete(svn);
@@ -352,8 +415,10 @@ export function codeGenStmt(stmt : Stmt<Type>, locals : Env, global_vars : Env) 
           valStmts.push(`(global.set $${stmt.name})`); 
         }
       }
-
-      obj_name_reg = "none";
+      if (prev_obj_name_reg !== undefined && prev_obj_name_reg != obj_name_reg){
+        obj_name_reg = prev_obj_name_reg;
+      }
+      console.log("AFTER: prev_obj", prev_obj_name_reg, "obj", obj_name_reg);
       return valStmts;
     case "expr":
       const result = codeGenExpr(stmt.expr, locals);
@@ -402,6 +467,7 @@ export function compile(source : string) : string {
   console.log("after tc, ast:", ast)
   decl_of_funcs = [];
   const emptyEnv = new Map<string, boolean>();
+  tmp_vars = [];
   const [vars, funs, stmts] = varsFunsStmts(ast);
   const funsCode : string[] = funs.map(f => codeGenStmt(f, emptyEnv, emptyEnv)).map(f => f.join("\n"));
   const allFuns = funsCode.join("\n\n");
@@ -419,7 +485,7 @@ export function compile(source : string) : string {
     retType = "(result i32)";
     retVal = "(local.get $scratch)"
   }
-
+  const tmpvarDecls = tmp_vars.map(v => `(global $${v} (mut i32) (i32.const 0))`).join("\n");
   return `
     (module
       (func $print_num (import "imports" "print_num") (param i32) (result i32))
@@ -428,6 +494,7 @@ export function compile(source : string) : string {
       (memory (import "imports" "mem") 1)
       (global $heap (mut i32) (i32.const 4))
       ${varDecls}
+      ${tmpvarDecls}
       ${decl_of_funcs}
       ${allFuns}
       (func (export "_start") ${retType}
